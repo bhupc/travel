@@ -1,0 +1,6 @@
+eat
+sleep
+see
+shop
+night
+do
