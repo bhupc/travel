@@ -3,37 +3,47 @@ import pprint
 import xml.dom.minidom
 from xml.dom.minidom import Node
 import pickle
-import MySQLdb
+#import MySQLdb
 import time
+import sys
 
+
+gCurrentWaitTime = 1;
+MAX_OBJS_IN_FILE = 500;
+
+def escapeThrottle():
+  global gCurrentWaitTime;
+  gCurrentWaitTime *= 2;
+  print "Current Wait time is ", gCurrentWaitTime;
+  time.sleep(gCurrentWaitTime);
+
+def unThrottle():
+  global gCurrentWaitTime;
+  if gCurrentWaitTime >= 2:
+    gCurrentWaitTime /= 2;
 
 
 def sendHTTPRequest(method, host, path):
-  conn = httplib.HTTPConnection(host)
-  conn.request(method, path)
-  r1 = conn.getresponse()
-  return r1;
-
+  conn = httplib.HTTPConnection(host);
+  conn.request(method, path);
+  resp = conn.getresponse();
+  if resp.status == 200:
+    unThrottle();
+    return resp;
+  else:
+    escapeThrottle();
+  return sendHTTPRequest(method, host, path); 
 
 def findPlaceByName(name):
   path = "/api/places?name="+name;
   resp = sendHTTPRequest("GET", "apigateway.lonelyplanet.com", path);
-  if resp.status == 200:
-    return resp.read();
-  print "In findPlaceByName, Got non 200 response status";
-  return None;
+  return resp.read();
 
 
 def findPoiByID(poiID):
   path = "/api/pois/"+poiID;
   resp = sendHTTPRequest("GET", "apigateway.lonelyplanet.com", path);
-  if resp.status == 200:
-    return resp.read();
-  else:
-    print "In findPoiById, Got non 200 response status...sleeping"; 
-    time.sleep(60);
-    print "woke up...";
-    return findPoiByID(poiID);
+  return resp.read();
 
 def parseXML(xmlData):
   doc = xml.dom.minidom.parseString(xmlData);
@@ -61,7 +71,7 @@ def parseXMLForPOI(xmlData):
   
   poi_obj["review"] = [];
   for tag_node in poi.childNodes:
-    print "tag = %s\n" %(tag_node.localName);
+    #print "tag = %s\n" %(tag_node.localName);
     if tag_node.localName != None and tag_node.childNodes.length > 0:
       if tag_node.localName == "poi-type":
         poi_obj["poi-type"] = tag_node.childNodes[0].data;
@@ -116,6 +126,11 @@ def printPOIObject(poi_obj):
       print "\n%s not found\n" %(attr);
 
 
+# dumping obj to a file
+
+def dumpToFile(obj, fp):
+    pickle.dump(obj, fp);	
+
 
 
 
@@ -138,7 +153,7 @@ def loadObjectFromDB(fp):
 
 def getPlaceExample():
   xmlData = findPlaceByName("sanfrancisco");
-  print xmlData;
+  #print xmlData;
   if xmlData != None:
     places = parseXML(xmlData);
     printPlacesObject(places);
@@ -147,7 +162,7 @@ def getPlaceExample():
 
 def getPOIExample(poiID):
   xmlData = findPoiByID(poiID);
-  print xmlData;
+  #print xmlData;
   poi = {};
   if xmlData != None:
     poi = parseXMLForPOI(xmlData);
@@ -159,18 +174,10 @@ def getPOIExample(poiID):
 
 
 def getPOIList(place,category):
-
- path = "/api/places/"+place+"/pois?poi_type="+category;
- print path;
- resp = sendHTTPRequest("GET","apigateway.lonelyplanet.com",path);
- if resp.status == 200:
+  path = "/api/places/"+place+"/pois?poi_type="+category;
+  print path;
+  resp = sendHTTPRequest("GET","apigateway.lonelyplanet.com",path);
   return resp.read();
- else:
-  print "In getPoilist, Got non 200 response status...sleeping"; 
-  time.sleep(60);
-  print "woke up..."
-  return getPOIList(place, category);
-
 
 def parseXMLForPOIList(xmlData):
 
@@ -210,14 +217,49 @@ def persistPOIObjectToDB(poi):
   runDBQuery(query);
   attr_list = ["poi-name", "poi-type", "digital-longitude", "digital-latitude", "address", "review", "telephones"];
 
-xmlData  = getPOIList("361858" ,"Eat");
 
-if xmlData != None:
-  pois = parseXMLForPOIList(xmlData);
-  for poi in pois:
-	id1 = poi["id"];
-	print "id1 = ", id1;
-	poi_forId = getPOIExample(id1);
-	persistPOIObjectToDB(poi_forId);
+def POIForPlaceAndCategory(placeID, category):
+  global MAX_OBJS_IN_FILE;
+
+  xmlData  = getPOIList(placeID , category);
+  currentFileIndex = 0;
+  filePrefix = "%s_%s" %(placeID, category);
+  totalAdded = 0;
+  if xmlData != None:
+    pois = parseXMLForPOIList(xmlData);
+    ctr = 0;
+    this_round = [];
+    for poi in pois:
+      id1 = poi["id"];
+      print "id1 = ", id1;
+      poi_forId = getPOIExample(id1);
+      this_round.append(poi_forId);
+      totalAdded += 1;
+      print "Total Records added = ", totalAdded;
+      ctr = ctr + 1;
+      if ctr == MAX_OBJS_IN_FILE:
+        fileName = "%s_%d" %(filePrefix, currentFileIndex);
+        fp = open(fileName, "wb");
+        dumpToFile(this_round, fp);
+        this_round = [];
+        currentFileIndex += 1;
+        ctr = 0;
+    fileName = "%s_%d" %(filePrefix, currentFileIndex);
+    fp = open(fileName, "wb");
+    dumpToFile(this_round, fp);
 
 
+def loadFromFile(fp):
+  return pickle.load(fp);
+  
+
+def main():
+  if len(sys.argv) != 3:
+    print "Error. Enter placeID  and category as id";
+    return;
+
+  POIForPlaceAndCategory(sys.argv[1], sys.argv[2]);
+  #fp = open("361858_Eat_0", "r");
+  #poi_array = loadFromFile(fp);
+  
+main();
