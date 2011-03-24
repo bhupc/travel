@@ -118,7 +118,7 @@ def printPlacesObject(places):
 
 
 def printPOIObject(poi_obj):
-  attr_list = ["poi-name", "poi-type", "digital-longitude", "digital-latitude", "address", "review", "telephones"];
+  attr_list = ["name", "poi-type", "digital-longitude", "digital-latitude", "address", "review", "telephones"];
   for attr in attr_list:
     if attr == "address" or attr == "review" or attr == "telephones":
       print poi_obj[attr]
@@ -263,3 +263,4 @@ def main():
   #poi_array = loadFromFile(fp);
   
 main();
+
